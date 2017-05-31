@@ -35,7 +35,9 @@ public class Cliente {
             ){
             
             System.out.println("Archivo recibido del SERVIDOR");
-            recibirArchivo();
+            recibirArchivo(); //recibo archivo cifrado
+            
+            //descifro el archivo recibido
             
             
             
