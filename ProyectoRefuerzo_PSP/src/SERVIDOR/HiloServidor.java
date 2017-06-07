@@ -5,6 +5,7 @@
  */
 package SERVIDOR;
 
+import TRASPASO.Fichero;
 import java.io.BufferedInputStream;
 import java.io.File;
 import java.io.FileInputStream;
@@ -17,17 +18,19 @@ import java.net.Socket;
 import java.security.MessageDigest;
 import java.security.spec.KeySpec;
 import static java.util.Arrays.copyOf;
+import java.util.Base64;
 import javax.crypto.Cipher;
 import javax.crypto.CipherOutputStream;
 import javax.crypto.SecretKey;
 import javax.crypto.SecretKeyFactory;
 import javax.crypto.spec.DESedeKeySpec;
+import TRASPASO.Mensajes;
 
 /**
  *
  * @author ruben
  */
-public class HiloServidor implements Serializable{
+public class HiloServidor implements Runnable{
     int ncli;
     Socket con;
     ObjectInputStream OIS;
@@ -36,34 +39,35 @@ public class HiloServidor implements Serializable{
     FileOutputStream FOS;
     BufferedInputStream BIS;
     String suma =null;
-    
+    File fichero = new File("confidencial.txt");
 
     public HiloServidor(Socket con, int ncli) {
         this.ncli = ncli;
         this.con = con;
     }
     
-    public void run() throws IOException{
-        File fichero = new File("confidencial.txt");
-        File fichero_des = new File("confidencial_des"+ncli);
-        if(!fichero_des.exists()){
-            fichero.createNewFile();
-        }
+    @Override
+    public void run(){
+        
+        File ficheroDes = new File("confidencial_des"+ncli);
+        try{
+            if(!ficheroDes.exists()){
+                fichero.createNewFile();
+            }
+        }catch(Exception e){
+            System.out.println("Error -> "+e.getMessage());
+        }    
         
         
         try(
                 FileInputStream fis = new FileInputStream(fichero);
-                ObjectInputStream ois = new ObjectInputStream(fis);
-                
-                FileOutputStream fos = new FileOutputStream(fichero_des);
-                ObjectOutputStream oos = new ObjectOutputStream(fos);
-                
+                ObjectInputStream ois = new ObjectInputStream(con.getInputStream());
+                ObjectOutputStream oos = new ObjectOutputStream(con.getOutputStream());        
                 BufferedInputStream bis = new BufferedInputStream(fis);
             ){
         
             FIS=fis;
             OIS=ois;
-            FOS=fos;
             OOS=oos;
             BIS=bis;
             
@@ -72,8 +76,13 @@ public class HiloServidor implements Serializable{
             System.out.println("El resultado de la suma es = "+suma);
             System.out.println("Cifrando fichero...");
             cifrarFichero();
-            System.out.println("Fichero cifrado. Enviando...");
-            mandarFichero(fichero_des);
+            System.out.println("!Fichero cifrado!. Enviando...");
+            mandarFile();
+            System.out.println("!Fichero enviado!. Enviando suma... ");
+            mandarSuma();
+            System.out.println("!Suma enviada!. Enviando suma... ");
+            System.out.println("***Procesos Finalizados***");
+            
             
             
             
@@ -84,25 +93,19 @@ public class HiloServidor implements Serializable{
 //------------------------------------------------------------------------------
     private void checkSum() {
         byte[] fileBytes = new byte[1024];
+        byte[]sha =null;
         MessageDigest md = null;
-        int read =0;
+        
         
         try{
             md = MessageDigest.getInstance("SHA-256");
-            while((read = BIS.read(fileBytes)) >0){
+            int read = 0;
+            while((read = BIS.read(fileBytes)) > 0){
                 md.update(fileBytes,0,read);
             }
             
-            byte[] hexa  = md.digest();
-            String result="";
-            
-            for(byte aux: hexa){
-                int b =aux & 0xff;
-                if(Integer.toHexString(b).length() ==1) result +="0";
-                result += Integer.toHexString(b);
-            }
-            
-            suma = result;
+            sha = md.digest();
+            suma = Base64.getEncoder().encodeToString(sha);
             
         }catch(Exception ex){
             System.out.println("Error -> "+ex.getMessage());
@@ -117,9 +120,15 @@ public class HiloServidor implements Serializable{
         SecretKeyFactory skf;
         Cipher cifrar;
         SecretKey clave_priv;
-        byte[] encriptado = new byte[1024];
+        byte[] encriptado = new byte[512];
         
-        try{
+        try(
+               FileOutputStream fos = new FileOutputStream("confidencial.des"+ncli);
+               FileInputStream fis = new FileInputStream("confidencial.txt") 
+            
+            )
+        
+        {
             byte [] bclaveprovisional = clave.getBytes("UTF8");
             byte [] bclave =copyOf(bclaveprovisional, 24);
             ks = new DESedeKeySpec(bclave);
@@ -128,9 +137,9 @@ public class HiloServidor implements Serializable{
             
             cifrar = Cipher.getInstance("DESede");
             cifrar.init(Cipher.ENCRYPT_MODE, clave_priv);
-            CipherOutputStream cos = new CipherOutputStream(FOS, cifrar);
+            CipherOutputStream cos = new CipherOutputStream(fos, cifrar);
             int aux=0;
-            while((aux = BIS.read(encriptado)) > 0){
+            while((aux = fis.read(encriptado)) > 0){
                 cos.write(encriptado,0,aux);
                 cos.flush();
             }
@@ -141,7 +150,58 @@ public class HiloServidor implements Serializable{
         
     }
 //------------------------------------------------------------------------------
-    private void mandarFichero(File fichero_des) {
+    private void mandarSuma() {
+        Mensajes ms = new Mensajes();
+        ms.setTexto(suma);
         
+        //enviar la suma
+        try{
+            OOS.writeObject(ms);
+            System.out.println("\t4.1.- CheckSum a mandar: " + ms.getTexto());
+        }catch(Exception e){
+            System.err.println("Error -> "+e.getMessage());
+        }
+    }
+//------------------------------------------------------------------------------
+    public void mandarFile(){
+        int p=0;
+        boolean enviadoUltimo=false;
+        File file = new File("confidencial.des"+ncli);
+        
+        if(!file.exists()){
+           System.err.println("No existe el fichero encriptado Copia!!!!!");
+            System.exit(-1); 
+        }
+        
+        try(
+            FileInputStream fis = new FileInputStream(file);
+            ){
+            
+            Fichero fichero = new Fichero();
+            fichero.setNombre("confidencial.des"+ncli);
+            int leidos=0;
+            
+            while((leidos=fis.read(fichero.getTrozo()))>0){
+                
+                fichero.setBytesValidos(leidos);
+                if(leidos < Fichero.longitud){
+                    fichero.setUltimo(true);
+                    enviadoUltimo=true;
+                }else{
+                    fichero.setUltimo(false);
+                }
+                OOS.writeObject(fichero);
+                if(fichero.isUltimo()){
+                    break;
+                }
+                
+                fichero = new Fichero();
+                fichero.setNombre("confidencial.des"+ncli);
+            }
+        }catch(Exception e){}
+        
+        if(fichero.delete()){
+            System.out.println("fichero borrado");
+        }
     }
 }

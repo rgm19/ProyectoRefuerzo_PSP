@@ -25,7 +25,7 @@ public class Servidor {
             ){
                 while(true){
                     HiloServidor hs = new HiloServidor(ss.accept(), num);
-                    Thread hilo = new Thread((Runnable) hs);
+                    Thread hilo = new Thread(hs);
                     hilo.start();
                     num++;
                 }

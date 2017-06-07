@@ -14,7 +14,7 @@ public class Fichero implements java.io.Serializable {
     private boolean ultimo;
     private int bytesValidos=0;
     private byte[] trozo = new byte[longitud];
-    private final static int longitud =10;
+    public final static int longitud =10;
 
     public Fichero() {
     }
